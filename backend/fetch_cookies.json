@@ -1,0 +1,82 @@
+[
+  {
+    "name": "JSESSIONID",
+    "value": "ajax:7376543379619489625",
+    "domain": ".www.linkedin.com",
+    "path": "/",
+    "expires": -1,
+    "httpOnly": false,
+    "secure": true,
+    "sameSite": "None"
+  },
+  {
+    "name": "lang",
+    "value": "v=2&lang=en-us",
+    "domain": ".linkedin.com",
+    "path": "/",
+    "expires": -1,
+    "httpOnly": false,
+    "secure": true,
+    "sameSite": "None"
+  },
+  {
+    "name": "bcookie",
+    "value": "\"v=2&672fcca9-6b4d-4c38-858c-8353db8bda60\"",
+    "domain": ".linkedin.com",
+    "path": "/",
+    "expires": 1813602251.878753,
+    "httpOnly": false,
+    "secure": true,
+    "sameSite": "None"
+  },
+  {
+    "name": "bscookie",
+    "value": "\"v=1&20260621182411c3d59ffe-fb03-4a2a-8622-7d0d635c23d8AQEww19COMleANPOPrD2Vo0NRsk8zQvR\"",
+    "domain": ".www.linkedin.com",
+    "path": "/",
+    "expires": 1813602251.878937,
+    "httpOnly": true,
+    "secure": true,
+    "sameSite": "None"
+  },
+  {
+    "name": "lidc",
+    "value": "\"b=VGST08:s=V:r=V:a=V:p=V:g=3462:u=1:x=1:i=1782066251:t=1782152651:v=2:sig=AQFbq46du5FBpL7KVozNowUSWgi63LlQ\"",
+    "domain": ".linkedin.com",
+    "path": "/",
+    "expires": 1782152651.87896,
+    "httpOnly": false,
+    "secure": true,
+    "sameSite": "None"
+  },
+  {
+    "name": "__cf_bm",
+    "value": "N5du5PQByoaaAC36VTlWlDzRidj68kZ7pavbOOjW2Aw-1782066251.1602447-1.0.1.1-jLA79EMmesExgCP._J5F.MiwGr2z5oo5m0J0VlT.OBXcj88z9twsoVhU_OpeJiI8Jp.jGSp9llQREMgk1XFipsm7mCvpRvQQyuE8VPwPKVQqbM5kUSDWyV5cYAqOFWtD",
+    "domain": ".linkedin.com",
+    "path": "/",
+    "expires": 1782068051.878981,
+    "httpOnly": true,
+    "secure": true,
+    "sameSite": "None"
+  },
+  {
+    "name": "_t_ds",
+    "value": "94a246531782066264-894a24653-094a24653",
+    "domain": ".naukri.com",
+    "path": "/",
+    "expires": 1813602264.753414,
+    "httpOnly": true,
+    "secure": true,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "J",
+    "value": "0",
+    "domain": ".naukri.com",
+    "path": "/",
+    "expires": 1813602264.753458,
+    "httpOnly": true,
+    "secure": true,
+    "sameSite": "Lax"
+  }
+]

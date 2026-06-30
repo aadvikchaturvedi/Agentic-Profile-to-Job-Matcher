@@ -1,0 +1,19 @@
+# Scoring weight configuration
+# Each top-level key maps a ParsedResume field to its weight.
+# Fields not listed get weight 0.
+weights:
+  skills: 0.50
+  experience: 0.30
+  relevance: 0.20
+
+# Sub-weights for relevance breakdown
+relevance:
+  title_match: 0.20
+  skills_semantic: 0.40
+  experience_semantic: 0.25
+  keywords: 0.15
+
+# When enabled, embedding similarity replaces keyword overlap for relevance.
+embeddings:
+  enabled: true
+  model: "all-MiniLM-L6-v2"

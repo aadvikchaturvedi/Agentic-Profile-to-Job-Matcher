@@ -3,5 +3,17 @@ from .model import (
     UserQuery,
     ParsedResume,
     SkillGapAnalysis,
-    AgentResponse
+    MatchResult,
+    AgentResponse,
+    ProgressUpdate,
 )
+
+__all__ = [
+    "JobDescription",
+    "UserQuery",
+    "ParsedResume",
+    "SkillGapAnalysis",
+    "MatchResult",
+    "AgentResponse",
+    "ProgressUpdate",
+]
