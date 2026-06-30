@@ -8,6 +8,4 @@ python_version = "3.12"
 strict = false
 ignore_missing_imports = true
 
-[tool.pytest.ini_options]
-testpaths = ["backend/tests"]
-python_files = ["test_*.py"]
+

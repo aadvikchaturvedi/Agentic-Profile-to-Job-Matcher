@@ -36,17 +36,5 @@ services:
       - ./backend/logs:/app/backend/logs
       - ./scoring_weights.yaml:/app/scoring_weights.yaml
 
-  frontend:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    ports:
-      - "8501:8501"
-    environment:
-      - API_BASE=http://api:8000
-    depends_on:
-      - api
-    command: streamlit run frontend/app.py --server.port 8501 --server.address 0.0.0.0
-
 volumes:
   ollama_data:

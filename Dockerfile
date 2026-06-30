@@ -15,12 +15,10 @@ RUN python3 -m playwright install chromium && \
     python3 -m playwright install-deps chromium
 
 COPY backend/ backend/
-COPY frontend/ frontend/
 COPY scoring_weights.yaml .
 
 ENV PYTHONPATH=/app/backend
 
-EXPOSE 8000 8501
+EXPOSE 8000
 
-# Start FastAPI + Streamlit via supervisord or just default to API
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

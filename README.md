@@ -47,8 +47,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 playwright install chromium
 
-cd backend
-PYTHONPATH=. ../.venv/bin/uvicorn app.main:app --reload --port 8000
+.venv/bin/uvicorn app.main:app --reload --port 8000   # from repo root
 ```
 
 ### Frontend

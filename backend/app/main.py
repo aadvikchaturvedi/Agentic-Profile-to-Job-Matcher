@@ -2,13 +2,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from slowapi import _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
 from loguru import logger
 
-from app.api.routes import router, limiter
 from app.utils.logging_config import setup_logging
-from app.core.shutdown import graceful_shutdown
 from new.db import init_db
 from new.api.runs import router as new_runs_router
 from new.api.health import router as new_health_router
@@ -21,7 +17,6 @@ async def lifespan(application: FastAPI):
     init_db()
     logger.info("New multi-agent job extractor DB initialized")
     yield
-    await graceful_shutdown()
 
 
 setup_logging()
@@ -34,9 +29,6 @@ app = FastAPI(
     redoc_url="/redoc",
     lifespan=lifespan,
 )
-
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 
 app.add_middleware(
     CORSMiddleware,
@@ -64,7 +56,6 @@ async def generic_exception_handler(request: Request, exc: Exception):
     )
 
 
-app.include_router(router)
 app.include_router(new_runs_router)
 app.include_router(new_health_router)
 app.include_router(new_ws_router)
