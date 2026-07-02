@@ -1,0 +1,42 @@
+app = "job-extract-api"
+primary_region = "sin"
+
+[build]
+  dockerfile = "Dockerfile"
+  build_context = "backend"
+
+[env]
+  PORT = "8000"
+  JOBEXTRACT_LLM_BASE_URL = "https://api.groq.com/openai/v1"
+  JOBEXTRACT_LLM_MODEL = "llama3-8b-8192"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 25
+    soft_limit = 20
+
+[[vm]]
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 1
+
+[[mounts]]
+  source = "sqlite_data"
+  destination = "/data"
+
+[checks]
+  [checks.health]
+    grace_period = "30s"
+    interval = "15s"
+    method = "GET"
+    path = "/api/new/health"
+    port = 8000
+    timeout = "10s"
+    type = "http"

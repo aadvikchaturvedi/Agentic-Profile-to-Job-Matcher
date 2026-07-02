@@ -1,24 +1,9 @@
 FROM python:3.11-slim
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    tesseract-ocr \
-    tesseract-ocr-eng \
-    && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
-
+RUN apt-get update && apt-get install -y wget gnupg ca-certificates
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-RUN python3 -m playwright install chromium && \
-    python3 -m playwright install-deps chromium
-
-COPY backend/ backend/
-COPY scoring_weights.yaml .
-
-ENV PYTHONPATH=/app/backend
-
-EXPOSE 8000
-
+RUN playwright install --with-deps chromium
+COPY . .
+ENV PYTHONPATH=/app
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

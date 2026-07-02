@@ -1,6 +1,7 @@
 from new.api.ws import manager
 from new.db import engine
 from new.models import Run
+from sqlmodel import Session
 
 
 async def pipeline_to_ws(agent: str, status: str, message: str):

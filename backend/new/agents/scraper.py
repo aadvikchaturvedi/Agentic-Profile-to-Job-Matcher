@@ -1,5 +1,6 @@
 import asyncio
 import re
+from typing import Optional
 from urllib.parse import urlparse, urljoin
 from loguru import logger
 from new.agents.base import BaseAgent, LLMClient, EventCallback
@@ -46,15 +47,30 @@ class ScraperAgent(BaseAgent):
                 links.add(full)
         return list(links)
 
-    async def _scrape_page(self, url: str) -> tuple[str, str]:
+    async def _scrape_page(self, url: str) -> tuple[Optional[str], Optional[str]]:
+        """Scrape a single page.
+
+        Returns ``(content, final_url)`` on success. On any failure
+        (Playwright timeout, network error, etc.) logs URL + error and
+        returns ``(None, None)`` without raising so the agent pipeline
+        can degrade gracefully.
+        """
         await self.rate_limiter.wait(url)
         await self._ensure_browser()
         page = await self._context.new_page()
         try:
-            await page.goto(url, wait_until="networkidle", timeout=30000)
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
             await asyncio.sleep(1)
             content = await page.content()
             return content, page.url
+        except Exception as e:
+            logger.error(
+                "[AGENT:ScraperAgent] _scrape_page failed for url={}: {}: {}",
+                url,
+                type(e).__name__,
+                e,
+            )
+            return None, None
         finally:
             await page.close()
 
@@ -90,6 +106,11 @@ class ScraperAgent(BaseAgent):
 
         try:
             content, final_url = await self._scrape_page(url)
+            if content is None or final_url is None:
+                error_msg = f"Failed to scrape {url}"
+                logger.error("[AGENT:ScraperAgent] {}", error_msg)
+                await self.emit("failed", error_msg[:100])
+                return {"pages": pages, "error": error_msg}
             title_match = re.search(r"<title>(.*?)</title>", content, re.DOTALL | re.IGNORECASE)
             title = title_match.group(1).strip() if title_match else final_url
             pages.append({"url": final_url, "html": content, "page_num": 1, "title": title})
@@ -101,34 +122,37 @@ class ScraperAgent(BaseAgent):
             if max_pages > 1:
                 pagination_urls = await self._find_pagination_urls(content, url)
                 seen = {final_url}
+                # ``max_pages - 1`` caps the slice so pagination can never
+                # loop infinitely even if ``_find_pagination_urls`` returns
+                # many URLs or duplicates.
                 for i, page_url in enumerate(pagination_urls[: max_pages - 1], start=2):
                     if page_url in seen:
                         continue
                     seen.add(page_url)
-                    try:
-                        p_content, p_final = await self._scrape_page(page_url)
-                        p_title_match = re.search(
-                            r"<title>(.*?)</title>", p_content, re.DOTALL | re.IGNORECASE
-                        )
-                        p_title = p_title_match.group(1).strip() if p_title_match else p_final
-                        pages.append(
-                            {
-                                "url": p_final,
-                                "html": p_content,
-                                "page_num": i,
-                                "title": p_title,
-                            }
-                        )
+                    p_content, p_final = await self._scrape_page(page_url)
+                    if p_content is None or p_final is None:
+                        errors.append(f"Page {i}: scrape failed")
                         await self.emit(
                             "progress",
-                            f"Scraped page {i}: {p_title[:80]}",
+                            f"Failed page {i}: scrape failed",
                         )
-                    except Exception as e:
-                        errors.append(f"Page {i}: {e}")
-                        await self.emit(
-                            "progress",
-                            f"Failed page {i}: {str(e)[:60]}",
-                        )
+                        continue
+                    p_title_match = re.search(
+                        r"<title>(.*?)</title>", p_content, re.DOTALL | re.IGNORECASE
+                    )
+                    p_title = p_title_match.group(1).strip() if p_title_match else p_final
+                    pages.append(
+                        {
+                            "url": p_final,
+                            "html": p_content,
+                            "page_num": i,
+                            "title": p_title,
+                        }
+                    )
+                    await self.emit(
+                        "progress",
+                        f"Scraped page {i}: {p_title[:80]}",
+                    )
 
             await self.emit(
                 "completed",
@@ -137,6 +161,11 @@ class ScraperAgent(BaseAgent):
             return {"pages": pages, "errors": errors, "domain": urlparse(url).hostname or url}
 
         except Exception as e:
+            logger.exception(
+                "[AGENT:ScraperAgent] unexpected error in run() for url={}: {}",
+                url,
+                e,
+            )
             await self.emit("failed", f"Scraper error: {str(e)[:100]}")
             return {"pages": pages, "error": str(e)}
 

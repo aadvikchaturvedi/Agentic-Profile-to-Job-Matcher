@@ -24,7 +24,11 @@ from loguru import logger
 
 class Pipeline:
     def __init__(self, llm_client: Optional[LLMClient] = None):
-        self.llm_client = llm_client or LLMClient()
+        self.llm_client = llm_client or LLMClient(
+            base_url=settings.llm_base_url,
+            model=settings.llm_model,
+            api_key=settings.groq_api_key
+        )
         self.rate_limiter = DomainRateLimiter(settings.rate_limit_per_domain)
         self._event_handlers: list[EventCallback] = []
         self._stop_requested = False
@@ -122,11 +126,15 @@ class Pipeline:
             run_max_pages = run_obj.max_pages
 
         logger.info("Run {} starting — url={} max_pages={}", run_id, run_url, run_max_pages)
-        error_occurred = False
+        scrape_error = False
+        parse_error = False
+        enrich_error = False
+        match_error = False
 
         try:
             # Stage 1: Scrape
             logger.info("Run {} — Stage 1: Scrape starting", run_id)
+            logger.info(f"[PIPELINE] starting {scraper.__class__.__name__} run_id={run_id}")
             scrape_result = await self._retry_agent(
                 scraper,
                 {
@@ -140,12 +148,13 @@ class Pipeline:
                 await self._finalize_run(run_id, "stopped", start_time)
                 return
             if scrape_result.get("error"):
-                error_occurred = True
+                scrape_error = True
             logger.info("Run {} — Stage 1: Scrape done ({} pages, error={})", run_id, len(scrape_result.get("pages", [])), scrape_result.get("error"))
 
             # Stage 2: Parse
             logger.info("Run {} — Stage 2: Parse starting", run_id)
             if scrape_result.get("pages"):
+                logger.info(f"[PIPELINE] starting {parser.__class__.__name__} run_id={run_id}")
                 parse_result = await self._retry_agent(
                     parser,
                     {"pages": scrape_result["pages"], "run_id": run_id},
@@ -158,18 +167,20 @@ class Pipeline:
                 await self._finalize_run(run_id, "stopped", start_time)
                 return
             if parse_result.get("error"):
-                error_occurred = True
+                parse_error = True
             logger.info("Run {} — Stage 2: Parse done ({} jobs, error={})", run_id, parse_result.get("total", 0), parse_result.get("error"))
 
             # Stage 3: Enrich
             logger.info("Run {} — Stage 3: Enrich starting", run_id)
             if parse_result.get("jobs"):
+                logger.info(f"[PIPELINE] starting {enrichment.__class__.__name__} run_id={run_id}")
                 enrich_result = await self._retry_agent(
                     enrichment,
                     {"jobs": parse_result["jobs"], "run_id": run_id},
                     "enrichment",
                 )
             else:
+                logger.info(f"[PIPELINE] starting {enrichment.__class__.__name__} run_id={run_id}")
                 enrich_result = await self._retry_agent(
                     enrichment,
                     {"jobs": parse_result.get("jobs", []), "run_id": run_id},
@@ -180,7 +191,7 @@ class Pipeline:
                 await self._finalize_run(run_id, "stopped", start_time)
                 return
             if enrich_result.get("error"):
-                error_occurred = True
+                enrich_error = True
             enriched_jobs = enrich_result.get("enriched_jobs", [])
             logger.info("Run {} — Stage 3: Enrich done ({} enriched, error={})", run_id, len(enriched_jobs), enrich_result.get("error"))
 
@@ -221,6 +232,7 @@ class Pipeline:
             # MatchingAgent has its own LLM health check and handles
             # LLM unavailability gracefully (fallback to embedding-only).
             logger.info("Run {} — Stage 4: Match starting", run_id)
+            match_result = {}
             with Session(engine) as session:
                 active_resume = session.exec(
                     select(Resume).where(Resume.is_active == True)
@@ -234,6 +246,7 @@ class Pipeline:
                     "titles_held": active_resume.titles_held,
                     "seniority_level": active_resume.seniority_level,
                 }
+                logger.info(f"[PIPELINE] starting {matching.__class__.__name__} run_id={run_id}")
                 match_result = await self._retry_agent(
                     matching,
                     {
@@ -268,12 +281,21 @@ class Pipeline:
 
                 logger.info("Run {} — Matching done ({} matches)", run_id, len(match_result.get("matches", [])))
 
+            if match_result.get("error"):
+                match_error = True
+
             if self._stop_requested:
                 logger.info("Run {} — stop requested, aborting", run_id)
                 await self._finalize_run(run_id, "stopped", start_time)
                 return
 
-            final_status = "failed" if error_occurred else "completed"
+            any_error = scrape_error or parse_error or enrich_error or match_error
+            if scrape_result.get("pages") and not scrape_error and (parse_error or enrich_error or match_error):
+                final_status = "partial"
+            elif any_error:
+                final_status = "failed"
+            else:
+                final_status = "completed"
             logger.info("Run {} — pipeline finished with status={}", run_id, final_status)
             await self._finalize_run(run_id, final_status, start_time)
 

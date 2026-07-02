@@ -75,8 +75,22 @@ class TaskManager:
 
     def stop_run(self, run_id: str) -> bool:
         pipeline = self._pipelines.get(run_id)
+        task = self._tasks.get(run_id)
         if pipeline:
             pipeline.request_stop()
+        if task and not task.done():
+            task.cancel()
+        if pipeline or task:
+            # Update DB status
+            from new.db import engine
+            from sqlmodel import Session
+            from new.models import Run
+            with Session(engine) as session:
+                run_obj = session.get(Run, run_id)
+                if run_obj and run_obj.status not in ("completed", "failed"):
+                    run_obj.status = "stopped"
+                    session.add(run_obj)
+                    session.commit()
             return True
         return False
 

@@ -13,7 +13,11 @@ class BaseAgent:
         on_event: Optional[EventCallback] = None,
     ):
         self.name = name
-        self.llm_client = llm_client or LLMClient()
+        self.llm_client = llm_client or LLMClient(
+            base_url=settings.llm_base_url,
+            model=settings.llm_model,
+            api_key=settings.groq_api_key
+        )
         self.on_event = on_event
 
     async def emit(self, status: str, message: str):

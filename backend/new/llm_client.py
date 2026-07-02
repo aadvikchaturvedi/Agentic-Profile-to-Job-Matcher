@@ -1,90 +1,105 @@
 import json
+import logging
 import httpx
-from typing import Optional, Type
-from pydantic import BaseModel
-from new.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class LLMClient:
-    def __init__(
-        self,
-        base_url: Optional[str] = None,
-        model: Optional[str] = None,
-        api_key: Optional[str] = None,
-        provider: Optional[str] = None,
-    ):
-        self.base_url = (base_url or settings.llm_base_url).rstrip("/")
-        self.model = model or settings.llm_model
-        self.api_key = api_key or settings.llm_api_key
-        self.provider = provider or settings.llm_provider
+    def __init__(self, base_url: str, model: str, api_key: str | None = None):
+        self.base_url = base_url.rstrip("/")
+        self.model = model
+        self.api_key = api_key
 
-    async def complete(
-        self, prompt: str, schema: Optional[Type[BaseModel]] = None,
-        timeout: Optional[float] = None,
-    ) -> str:
-        if self.provider == "ollama":
-            return await self._ollama_complete(prompt, schema, timeout)
-        return await self._openai_complete(prompt, schema, timeout)
-
-    async def _ollama_complete(
-        self, prompt: str, schema: Optional[Type[BaseModel]] = None,
-        timeout: Optional[float] = None,
-    ) -> str:
-        url = f"{self.base_url}/api/generate"
-        json_schema = None
-        if schema:
-            json_schema = schema.model_json_schema()
-        payload = {
-            "model": self.model,
-            "prompt": prompt,
-            "stream": False,
-            "temperature": 0.3,
-            "format": "json",
-        }
-        async with httpx.AsyncClient(timeout=timeout or 120.0) as client:
-            resp = await client.post(url, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-        raw = data.get("response", "")
-        return raw
-
-    async def _openai_complete(
-        self, prompt: str, schema: Optional[Type[BaseModel]] = None,
-        timeout: Optional[float] = None,
-    ) -> str:
-        url = f"{self.base_url}/chat/completions"
+    def _headers(self) -> dict:
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
-        messages = [{"role": "user", "content": prompt}]
+        return headers
+
+    async def complete(self, prompt: str, expect_json: bool = False) -> str:
+        url = f"{self.base_url}/v1/chat/completions"
         payload = {
             "model": self.model,
-            "messages": messages,
-            "temperature": 0.3,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.1,
         }
-        if schema:
+        if expect_json:
             payload["response_format"] = {"type": "json_object"}
-        async with httpx.AsyncClient(timeout=timeout or 120.0) as client:
-            resp = await client.post(url, json=payload, headers=headers)
-            resp.raise_for_status()
-            data = resp.json()
-        return data["choices"][0]["message"]["content"]
 
-    async def is_available(self) -> bool:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            try:
+                response = await client.post(
+                    url, headers=self._headers(), json=payload
+                )
+                response.raise_for_status()
+                content = response.json()["choices"][0]["message"]["content"]
+                logger.debug(f"[LLMClient] raw response: {content[:300]}")
+                return content
+            except httpx.HTTPStatusError as e:
+                logger.error(
+                    f"[LLMClient] HTTP {e.response.status_code}: {e.response.text[:300]}"
+                )
+                raise
+            except Exception as e:
+                logger.error(f"[LLMClient] request failed: {e}")
+                raise
+
+    async def health_check(self) -> bool:
         try:
-            if self.provider == "ollama":
-                url = f"{self.base_url}/api/tags"
-            else:
-                url = f"{self.base_url}/models"
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.get(url)
-                return resp.status_code == 200
-        except Exception:
+            url = f"{self.base_url}/v1/models"
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                r = await client.get(url, headers=self._headers())
+                r.raise_for_status()
+                logger.info(f"[LLMClient] health check passed at {self.base_url}")
+                return True
+        except Exception as e:
+            logger.error(f"[LLMClient] health check failed: {e}")
             return False
 
-    async def verify_completion(self) -> str:
-        """Run a trivial completion to verify the model is actually responsive."""
-        return await self._ollama_complete(
-            "Respond with a single word: ok",
-            timeout=15.0,
-        )
+    @staticmethod
+    def parse_json(raw: str) -> dict:
+        """
+        Robustly extract a JSON object from LLM output.
+
+        Handles markdown fences (```json...``` and ```...```), preamble text,
+        and trailing content. Always raises ValueError (never a bare
+        json.JSONDecodeError) so callers can catch a single exception type.
+        """
+        if raw is None:
+            raise ValueError("No JSON object found in LLM response: <empty>")
+
+        text = raw.strip()
+
+        # Strip markdown fences by splitting on ``` rather than using a
+        # non-greedy regex (which can fail on nested braces).
+        if "```" in text:
+            parts = text.split("```")
+            # parts alternates: [preamble, fence_lang_or_body, ..., body_or_text, ...]
+            # We look for the first fenced block that contains a '{'.
+            for i in range(1, len(parts), 2):
+                block = parts[i]
+                # Strip a leading language tag like "json" or "JSON".
+                stripped = block.lstrip()
+                if stripped[:4].lower() == "json":
+                    stripped = stripped[4:].lstrip()
+                if "{" in stripped:
+                    text = stripped
+                    break
+
+        # Find the outermost '{' and '}' in the cleaned text and slice.
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            raise ValueError(
+                f"No JSON object found in LLM response: {raw[:300]}"
+            )
+
+        candidate = text[start:end + 1]
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"Failed to decode JSON from LLM response: {raw[:300]} "
+                f"(error: {e})"
+            ) from e

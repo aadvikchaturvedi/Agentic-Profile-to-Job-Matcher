@@ -46,9 +46,11 @@ function AgentStatusPill({ status }: { status: string }) {
 function AgentTrack({
   name,
   events,
+  runStatus,
 }: {
   name: string;
   events: WsEvent[];
+  runStatus?: string;
 }) {
   const logEndRef = useRef<HTMLDivElement>(null);
 
@@ -70,6 +72,8 @@ function AgentTrack({
             )
           )?.data.status || "idle";
 
+  const isRunFailed = runStatus === "failed";
+
   return (
     <div className="border border-[#e5e5e5] rounded-lg bg-white overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 border-b border-[#e5e5e5] bg-[#fafafa]">
@@ -89,14 +93,22 @@ function AgentTrack({
       </div>
       <div className="h-40 overflow-y-auto p-2 font-mono text-[11px] leading-relaxed bg-[#fafafa]">
         {agentEvents.length === 0 && (
-          <p className="text-[#9e9e9e] italic">Waiting...</p>
+          <p
+            className={`italic ${
+              isRunFailed ? "text-red-500 font-medium" : "text-[#9e9e9e]"
+            }`}
+          >
+            {isRunFailed
+              ? "Run failed before this agent could start."
+              : "Waiting..."}
+          </p>
         )}
         {agentEvents.map((e, i) => (
           <div
             key={i}
             className={`${
               e.data.status === "failed"
-                ? "text-red-500"
+                ? "text-red-600 font-semibold bg-red-50 border border-red-200 rounded px-1.5 py-1 my-0.5"
                 : e.data.status === "completed"
                   ? "text-green-600"
                   : e.data.status === "skipped"
@@ -106,7 +118,7 @@ function AgentTrack({
                       : "text-gray-500"
             }`}
           >
-            <span className="text-[#9e9e9e] mr-1">
+            <span className="text-[#9e9e9e] mr-1 font-normal">
               {e.data.timestamp
                 ? new Date(e.data.timestamp).toLocaleTimeString()
                 : ""}
@@ -127,10 +139,29 @@ export default function AgentLiveStream({
   events: WsEvent[];
   runStatus?: string;
 }) {
+  const failedEvent = events.find((e) => e.data.status === "failed");
+  const isRunFailed = runStatus === "failed";
+
   return (
     <div className="space-y-3">
+      {isRunFailed && (
+        <div className="px-4 py-3 rounded-lg bg-red-50 border border-red-200">
+          <p className="text-[12px] font-semibold text-red-700 mb-1">
+            Run failed
+          </p>
+          <p className="text-[12px] text-red-600">
+            {failedEvent?.data.message ||
+              "The pipeline failed. See the agent logs below for details."}
+          </p>
+        </div>
+      )}
       {AGENT_ORDER.map((name) => (
-        <AgentTrack key={name} name={name} events={events} />
+        <AgentTrack
+          key={name}
+          name={name}
+          events={events}
+          runStatus={runStatus}
+        />
       ))}
     </div>
   );

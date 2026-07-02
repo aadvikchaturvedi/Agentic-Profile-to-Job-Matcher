@@ -242,7 +242,7 @@ export default function ResultsGrid({
   if (jobs.length === 0) {
     return (
       <div className="flex items-center justify-center h-64 text-[#9e9e9e] text-sm">
-        No jobs extracted yet. Run a new extraction to see results.
+        No jobs found for this URL.
       </div>
     );
   }

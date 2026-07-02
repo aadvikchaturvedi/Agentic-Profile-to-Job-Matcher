@@ -105,23 +105,33 @@ class EnrichmentAgent(BaseAgent):
             "location": 0.10,
             "source_url": 0.10,
         }
-        if job.get("title"):
-            score += weights["title"]
-        if job.get("company"):
-            score += weights["company"]
-        if job.get("tech_stack"):
-            score += weights["tech_stack"] * min(len(job["tech_stack"]) / 3, 1.0)
-        if job.get("salary_min") and job.get("salary_max"):
-            score += weights["salary"]
-        elif job.get("salary_text"):
-            score += weights["salary"] * 0.5
-        if job.get("location_raw") or job.get("location_type"):
-            score += weights["location"]
-        if job.get("source_url"):
-            score += weights["source_url"]
-        if job.get("from_llm"):
-            score *= 0.85
-        return round(min(score, 1.0), 2)
+        try:
+            if job.get("title"):
+                score += weights["title"]
+            if job.get("company"):
+                score += weights["company"]
+            if job.get("tech_stack"):
+                score += weights["tech_stack"] * min(len(job["tech_stack"]) / 3, 1.0)
+            if job.get("salary_min") and job.get("salary_max"):
+                score += weights["salary"]
+            elif job.get("salary_text"):
+                score += weights["salary"] * 0.5
+            if job.get("location_raw") or job.get("location_type"):
+                score += weights["location"]
+            if job.get("source_url"):
+                score += weights["source_url"]
+            if job.get("from_llm"):
+                score *= 0.85
+        except Exception as e:
+            logger.error(
+                "[AGENT:EnrichmentAgent] _compute_confidence error: {}: {}",
+                type(e).__name__,
+                e,
+            )
+            score = 0.0
+        # Always return a float clamped to [0.0, 1.0]. Never return None
+        # or an out-of-range value.
+        return float(round(min(max(score, 0.0), 1.0), 2))
 
     async def run(self, context: dict) -> dict:
         run_id = context.get("run_id", "?")

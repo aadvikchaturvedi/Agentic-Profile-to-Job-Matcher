@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from loguru import logger
 
-from new.agents.base import BaseAgent, LLMClient, EventCallback
+from new.agents.base import BaseAgent, EventCallback
 from new.llm_client import LLMClient as LLMClientImpl
 from new.config import settings
 
@@ -165,24 +165,11 @@ class MatchingAgent(BaseAgent):
             f"  Embedding Similarity: {similarity:.3f}\n"
         )
 
-        def _extract_json(raw_text: str) -> Optional[dict]:
-            start = raw_text.find("{")
-            end = raw_text.rfind("}")
-            if start == -1 or end == -1 or end <= start:
-                return None
-            return json.loads(raw_text[start : end + 1])
-
         raw = ""
         for attempt in range(2):  # original + 1 retry
             try:
-                raw = await self.llm_client.complete(
-                    prompt, schema=ScoringSchema, timeout=SCORING_TIMEOUT
-                )
-                data = _extract_json(raw)
-                if data is None:
-                    raise ValueError(
-                        f"No JSON object found in response. Raw: {raw[:500]}"
-                    )
+                raw = await self.llm_client.complete(prompt, expect_json=True)
+                data = LLMClientImpl.parse_json(raw)
                 return {
                     "match_score": min(10, max(1, int(data.get("match_score", 5)))),
                     "matched_skills": data.get("matched_skills", []),
@@ -219,25 +206,25 @@ class MatchingAgent(BaseAgent):
             await self.emit("skipped", "No active resume — skipping matching")
             return {"matches": [], "total": 0, "skipped": True}
 
-        # Verify LLM is reachable before scoring jobs
-        if not await self.llm_client.is_available():
-            logger.warning("MatchingAgent: LLM unavailable at {}", settings.llm_base_url)
-            await self.emit(
-                "failed",
-                "LLM server is not reachable — cannot perform LLM scoring. "
-                f"Check that Ollama is running at {settings.llm_base_url}",
-            )
-            return {"matches": [], "total": 0, "error": "LLM unavailable"}
+        # LLM is optional: if it's down, we still score via similarity fallback.
+        llm_ok = False
         try:
-            await self.llm_client.verify_completion()
+            llm_ok = await self.llm_client.health_check()
         except Exception as e:
-            logger.error("LLM health check failed: {}: {}", type(e).__name__, e)
-            await self.emit(
-                "failed",
-                f"LLM health check failed — model '{settings.llm_model}' at "
-                f"{settings.llm_base_url} is not responding correctly: {e}",
+            logger.warning(
+                "MatchingAgent: LLM check failed (will fallback): {}: {}",
+                type(e).__name__,
+                e,
             )
-            return {"matches": [], "total": 0, "error": f"LLM health check failed: {e}"}
+            llm_ok = False
+
+        if not llm_ok:
+            logger.warning("MatchingAgent: LLM unavailable at {} — using similarity-only scoring", settings.llm_base_url)
+            await self.emit(
+                "progress",
+                "LLM server is not reachable — using similarity-only scoring. "
+                f"(If you want LLM scoring, start Ollama at {settings.llm_base_url})",
+            )
 
         # Fire off background embedder loading (won't block the pipeline)
         asyncio.ensure_future(_try_load_embedder_background())
@@ -294,6 +281,8 @@ class MatchingAgent(BaseAgent):
 
         total_jobs = len(enriched_jobs)
         llm_count = min(self._top_n, total_jobs) if total_jobs > 50 else total_jobs
+        if not llm_ok:
+            llm_count = 0
 
         await self.emit(
             "progress",

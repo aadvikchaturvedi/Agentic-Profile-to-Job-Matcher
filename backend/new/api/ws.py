@@ -7,7 +7,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlmodel import Session, select
 
 from new.db import engine
-from new.models import RunEvent
+from new.models import RunEvent, Run
 
 router = APIRouter(tags=["new-ws"])
 
@@ -109,6 +109,41 @@ manager = ConnectionManager()
 @router.websocket("/ws/new/runs/{run_id}")
 async def run_websocket(websocket: WebSocket, run_id: str):
     await manager.connect(run_id, websocket)
+
+    # Check whether the run has already finalized; if so, send a final
+    # terminal event and close cleanly without entering the recv loop.
+    with Session(engine) as session:
+        run_obj = session.get(Run, run_id)
+        if run_obj and run_obj.status in ("completed", "failed", "stopped"):
+            final_status = run_obj.status
+            try:
+                if final_status == "completed":
+                    await websocket.send_json({
+                        "type": "complete",
+                        "data": {
+                            "run_id": run_id,
+                            "status": final_status,
+                            "job_count": run_obj.job_count,
+                        },
+                    })
+                else:
+                    await websocket.send_json({
+                        "type": "error",
+                        "data": {
+                            "message": f"Run {final_status}",
+                            "agent": "pipeline",
+                            "status": final_status,
+                        },
+                    })
+            except Exception:
+                pass
+            await manager.disconnect(run_id, websocket)
+            try:
+                await websocket.close()
+            except Exception:
+                pass
+            return
+
     try:
         while True:
             data = await websocket.receive_text()

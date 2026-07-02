@@ -1,6 +1,3 @@
-import json
-import re
-from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 from loguru import logger
 from new.agents.base import BaseAgent, LLMClient, EventCallback
@@ -78,6 +75,10 @@ class ParserAgent(BaseAgent):
         return candidates
 
     async def _parse_with_llm(self, html_snippets: list[str]) -> list[dict]:
+        # Skip the LLM call entirely when there's nothing meaningful to parse.
+        if not html_snippets or not any((s or "").strip() for s in html_snippets):
+            return []
+
         prompt = (
             "You are a job listing parser. Extract structured job data from the "
             "following HTML snippets. For each job, extract: title, company, "
@@ -93,25 +94,39 @@ class ParserAgent(BaseAgent):
 
         try:
             raw = await self.llm_client.complete(prompt)
-            cleaned = re.sub(r"^```(?:json)?\s*", "", raw.strip())
-            cleaned = re.sub(r"\s*```$", "", cleaned)
-            data = json.loads(cleaned)
+            # Use the shared robust JSON parser so markdown fences and
+            # preamble text are handled correctly.
+            data = LLMClientImpl.parse_json(raw)
             if isinstance(data, list):
                 return data
             if isinstance(data, dict) and "jobs" in data:
-                return data["jobs"]
+                jobs_value = data["jobs"]
+                return jobs_value if isinstance(jobs_value, list) else []
             return []
-        except Exception:
+        except Exception as e:
+            logger.error(
+                "[AGENT:ParserAgent] _parse_with_llm failed: {}: {}",
+                type(e).__name__,
+                e,
+            )
             return []
 
     async def run(self, context: dict) -> dict:
         run_id = context.get("run_id", "?")
         pages = context.get("pages", [])
         logger.info("[AGENT:ParserAgent] run() ENTERED for run_id={}", run_id)
-        if not pages:
-            logger.warning("ParserAgent: no pages to parse")
-            await self.emit("failed", "No pages to parse")
-            return {"jobs": [], "error": "No pages"}
+
+        # Handle empty/None input gracefully: no pages at all OR every
+        # page is missing/empty HTML. Emit ``completed`` so the pipeline
+        # can continue with an empty job list.
+        if not pages or not any((p or {}).get("html", "").strip() for p in pages):
+            logger.info(
+                "ParserAgent: no usable pages to parse (pages={}, run_id={})",
+                len(pages) if pages else 0,
+                run_id,
+            )
+            await self.emit("completed", "No pages to parse")
+            return {"jobs": [], "total": 0}
 
         await self.emit("started", f"Parsing {len(pages)} page(s) for job listings")
         all_jobs = []

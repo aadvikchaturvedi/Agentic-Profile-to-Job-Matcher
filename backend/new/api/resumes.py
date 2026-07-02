@@ -13,7 +13,12 @@ router = APIRouter(prefix="/api/new/resumes", tags=["new-resumes"])
 
 
 async def _parse_resume_text(raw_text: str) -> dict:
-    llm = LLMClient()
+    from new.config import settings
+    llm = LLMClient(
+        base_url=settings.llm_base_url,
+        model=settings.llm_model,
+        api_key=settings.groq_api_key
+    )
     prompt = (
         "Extract a structured profile from this resume text. "
         "Return JSON with keys: skills (list of strings), "
@@ -95,7 +100,25 @@ async def upload_resume(file: UploadFile = File(...)):
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
 
-    raw_text = await _extract_text_from_file(file)
+    allowed_types = {
+        "application/pdf",
+        "text/plain",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    }
+    if file.content_type and file.content_type not in allowed_types:
+        raise HTTPException(
+            status_code=400,
+            detail="Only PDF, text, and Word documents are supported.",
+        )
+
+    try:
+        raw_text = await _extract_text_from_file(file)
+    except UnicodeDecodeError:
+        raise HTTPException(
+            status_code=400,
+            detail="Could not extract text from file",
+        )
     if not raw_text.strip():
         raise HTTPException(status_code=400, detail="Could not extract text from file")
 
@@ -133,7 +156,7 @@ async def upload_resume(file: UploadFile = File(...)):
     }
 
 
-@router.get("/active", response_model=dict)
+@router.get("/active", response_model=Optional[dict])
 async def get_active_resume():
     with Session(engine) as session:
         resume = session.exec(
